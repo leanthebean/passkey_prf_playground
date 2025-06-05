@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passkey PRF Extension Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            box-sizing: border-box;
+        }
+        .output {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .step {
+            margin: 20px 0;
+        }
+        .step h3 {
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Passkey PRF Extension Example</h1>
+    <p>This example demonstrates the WebAuthn PRF (Pseudo-Random Function) extension with passkeys.</p>
+    
+    <div class="step">
+        <h3>Step 1: Passkey Setup</h3>
+        <div class="container">
+            <div id="passkeyStatus">
+                <p>Checking for existing passkeys...</p>
+            </div>
+            
+            <div id="authenticatorOptions" style="display: none;">
+                <h4>Register a new passkey:</h4>
+                <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">
+                    Different authenticators may have different capabilities. For PRF extension support, 
+                    try different options to see which ones work with your setup.
+                </p>
+                <div style="margin: 10px 0;">
+                    <input type="radio" id="platformAuth" name="authenticatorType" value="platform" checked>
+                    <label for="platformAuth"><strong>Platform Authenticator</strong> (Touch ID, Face ID, Windows Hello)</label>
+                    <div id="platformStatus" style="margin-left: 25px; font-size: 0.9em; color: #666;"></div>
+                    <div style="margin-left: 25px; font-size: 0.8em; color: #888;">Built into your device, uses biometrics or device PIN</div>
+                </div>
+                <div style="margin: 10px 0;">
+                    <input type="radio" id="crossPlatformAuth" name="authenticatorType" value="cross-platform">
+                    <label for="crossPlatformAuth"><strong>Cross-Platform Authenticator</strong> (USB Security Keys, etc.)</label>
+                    <div id="crossPlatformStatus" style="margin-left: 25px; font-size: 0.9em; color: #666;"></div>
+                    <div style="margin-left: 25px; font-size: 0.8em; color: #888;">External devices like YubiKey, Google Titan, etc.</div>
+                </div>
+                <div style="margin: 10px 0;">
+                    <input type="radio" id="anyAuth" name="authenticatorType" value="any">
+                    <label for="anyAuth"><strong>Let me choose during registration</strong></label>
+                    <div id="anyStatus" style="margin-left: 25px; font-size: 0.9em; color: #666;">Browser will show all available options</div>
+                    <div style="margin-left: 25px; font-size: 0.8em; color: #888;">Includes browser-managed passkeys (1Password, Chrome, etc.)</div>
+                </div>
+            </div>
+            
+            <div id="passkeyButtons">
+                <button id="useExistingBtn" onclick="useExistingPasskey()" style="display: none;">Use Existing Passkey</button>
+                <button id="registerBtn" onclick="registerPasskey()" style="display: none;">Register New Passkey</button>
+                <button id="showRegisterOptionsBtn" onclick="showRegisterOptions()" style="display: none;">Register New Passkey</button>
+                <button id="clearSavedBtn" onclick="clearSavedCredentials()" style="background: #6c757d; margin-left: 10px;">Clear Saved Passkeys</button>
+            </div>
+            <div id="registerStatus"></div>
+        </div>
+    </div>
+
+    <div class="step">
+        <h3>Step 2: PRF Evaluation</h3>
+        <div class="container">
+            <label for="saltInput">Enter Salt (hex string or text):</label>
+            <input type="text" id="saltInput" placeholder="Enter salt value (e.g., 'hello world' or '48656c6c6f20576f726c64')" value="hello world">
+            <br>
+            <button id="prfBtn" onclick="evaluatePRF()" disabled>Compute PRF!</button>
+            <div id="prfStatus"></div>
+            <div id="prfOutput"></div>
+        </div>
+    </div>
+
+    <script>
+        let credentialId = null;
+        let savedCredentials = [];
+
+        // Load saved credentials from localStorage
+        function loadSavedCredentials() {
+            try {
+                const saved = localStorage.getItem('webauthn_credentials');
+                if (saved) {
+                    savedCredentials = JSON.parse(saved);
+                }
+            } catch (error) {
+                console.warn('Error loading saved credentials:', error);
+                savedCredentials = [];
+            }
+        }
+
+        // Save credential to localStorage
+        function saveCredential(credId, prfSupported, authenticatorType) {
+            const credential = {
+                id: credId,
+                prfSupported: prfSupported,
+                authenticatorType: authenticatorType,
+                createdAt: new Date().toISOString(),
+                domain: window.location.hostname
+            };
+            
+            // Avoid duplicates
+            savedCredentials = savedCredentials.filter(cred => cred.id !== credId);
+            savedCredentials.push(credential);
+            
+            try {
+                localStorage.setItem('webauthn_credentials', JSON.stringify(savedCredentials));
+            } catch (error) {
+                console.warn('Error saving credential:', error);
+            }
+        }
+
+        // Check for existing passkeys
+        async function checkExistingPasskeys() {
+            const passkeyStatus = document.getElementById('passkeyStatus');
+            const useExistingBtn = document.getElementById('useExistingBtn');
+            const showRegisterOptionsBtn = document.getElementById('showRegisterOptionsBtn');
+            
+            loadSavedCredentials();
+            
+            if (savedCredentials.length > 0) {
+                const prfSupportedCreds = savedCredentials.filter(cred => cred.prfSupported);
+                
+                passkeyStatus.innerHTML = `
+                    <div class="success">
+                        <strong>Found ${savedCredentials.length} existing passkey(s) for this site:</strong><br>
+                        ${savedCredentials.map(cred => 
+                            `• ${cred.authenticatorType || 'Unknown'} (${cred.prfSupported ? 'PRF supported' : 'No PRF support'}) - Created: ${new Date(cred.createdAt).toLocaleDateString()}`
+                        ).join('<br>')}
+                        ${prfSupportedCreds.length > 0 ? 
+                            `<br><br><strong>${prfSupportedCreds.length} passkey(s) support PRF extension!</strong>` : 
+                            '<br><br><span style="color: #ffc107;"><strong>Note:</strong> None of your existing passkeys support PRF extension.</span>'
+                        }
+                    </div>
+                `;
+                
+                useExistingBtn.style.display = 'inline-block';
+                showRegisterOptionsBtn.style.display = 'inline-block';
+            } else {
+                passkeyStatus.innerHTML = `
+                    <div style="color: #666;">
+                        No existing passkeys found for this site. You'll need to register a new one.
+                    </div>
+                `;
+                showRegisterOptionsBtn.style.display = 'inline-block';
+            }
+        }
+
+        // Use existing passkey (let user choose)
+        async function useExistingPasskey() {
+            const passkeyStatus = document.getElementById('passkeyStatus');
+            
+            try {
+                passkeyStatus.innerHTML = '<div>Authenticating with existing passkey...</div>';
+                
+                const challenge = generateChallenge();
+                const testSalt = stringToUint8Array('test-prf-support');
+                
+                // Try to authenticate with PRF evaluation to test support
+                const getCredentialOptions = {
+                    publicKey: {
+                        challenge: challenge,
+                        userVerification: 'required',
+                        timeout: 60000,
+                        extensions: {
+                            prf: {
+                                eval: {
+                                    first: testSalt
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const cred = await navigator.credentials.get(getCredentialOptions);
+                credentialId = cred.id;
+                
+                const extensionResults = cred.getClientExtensionResults();
+                console.log('Authentication extension results:', extensionResults);
+                console.log('PRF extension results:', extensionResults.prf);
+                console.log('PRF results object:', extensionResults.prf?.results);
+                console.log('PRF first result:', extensionResults.prf?.results?.first);
+                
+                // Check if PRF actually worked by seeing if we got results
+                let prfSupported = false;
+                if (extensionResults.prf && extensionResults.prf.results && extensionResults.prf.results.first) {
+                    const prfResult = ensureUint8Array(extensionResults.prf.results.first);
+                    prfSupported = prfResult && prfResult.length > 0;
+                    console.log('PRF test result:', prfResult);
+                    console.log('PRF result length:', prfResult?.length);
+                    console.log('PRF supported based on test:', prfSupported);
+                } else {
+                    // Check if the authenticator might support PRF but we just didn't get results this time
+                    // Look at saved credentials to see if it was previously marked as supporting PRF
+                    const existingCred = savedCredentials.find(c => c.id === credentialId);
+                    if (existingCred && existingCred.prfSupported) {
+                        console.log('Credential was previously marked as PRF-supported, keeping that status');
+                        prfSupported = true;
+                    }
+                }
+                
+                // Update saved credential with PRF support info, but be conservative
+                const existingCred = savedCredentials.find(c => c.id === credentialId);
+                if (existingCred) {
+                    // Only update if we have clear evidence either way
+                    if (extensionResults.prf && extensionResults.prf.results && extensionResults.prf.results.first) {
+                        existingCred.prfSupported = prfSupported;
+                        try {
+                            localStorage.setItem('webauthn_credentials', JSON.stringify(savedCredentials));
+                        } catch (error) {
+                            console.warn('Error updating credential:', error);
+                        }
+                    }
+                    // If we don't get clear results, don't change the existing status
+                }
+                
+                passkeyStatus.innerHTML = `
+                    <div class="success">
+                        <strong>Successfully authenticated with existing passkey!</strong><br>
+                        Credential ID: ${credentialId}<br>
+                        PRF Extension Supported: ${prfSupported ? 'Yes' : 'No'}
+                        ${prfSupported ? '<br><span style="color: #28a745;">✓ PRF test evaluation successful!</span>' : ''}
+                    </div>
+                `;
+                
+                // Enable PRF button if supported
+                if (prfSupported) {
+                    document.getElementById('prfBtn').disabled = false;
+                } else {
+                    passkeyStatus.innerHTML += '<div style="color: #ffc107; margin-top: 10px;"><strong>Note:</strong> This passkey does not support PRF extension. Consider registering a new one with a different authenticator.</div>';
+                }
+                
+            } catch (error) {
+                passkeyStatus.innerHTML = `<div class="error">Authentication failed: ${error.message}</div>`;
+                console.error('Authentication error:', error);
+            }
+        }
+
+        // Show registration options
+        function showRegisterOptions() {
+            document.getElementById('authenticatorOptions').style.display = 'block';
+            document.getElementById('registerBtn').style.display = 'inline-block';
+            document.getElementById('showRegisterOptionsBtn').style.display = 'none';
+            detectAuthenticatorSupport();
+        }
+
+        // Clear saved credentials (for testing)
+        function clearSavedCredentials() {
+            if (confirm('Are you sure you want to clear all saved passkey information? This will not delete the actual passkeys, just the local storage.')) {
+                localStorage.removeItem('webauthn_credentials');
+                savedCredentials = [];
+                location.reload();
+            }
+        }
+
+        // Utility function to convert string to Uint8Array
+        function stringToUint8Array(str) {
+            return new TextEncoder().encode(str);
+        }
+
+        // Utility function to convert hex string to Uint8Array
+        function hexToUint8Array(hex) {
+            // Remove any spaces or non-hex characters
+            hex = hex.replace(/[^0-9a-fA-F]/g, '');
+            if (hex.length % 2 !== 0) {
+                throw new Error('Hex string must have even length');
+            }
+            const bytes = new Uint8Array(hex.length / 2);
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+            }
+            return bytes;
+        }
+
+        // Utility function to convert Uint8Array to hex string
+        function uint8ArrayToHex(bytes) {
+            return Array.from(bytes)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        }
+
+        // Generate a random challenge
+        function generateChallenge() {
+            return crypto.getRandomValues(new Uint8Array(32));
+        }
+
+        // Detect available authenticator types
+        async function detectAuthenticatorSupport() {
+            const platformStatus = document.getElementById('platformStatus');
+            const crossPlatformStatus = document.getElementById('crossPlatformStatus');
+            
+            // Check if platform authenticator is available
+            try {
+                const platformAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+                if (platformAvailable) {
+                    platformStatus.innerHTML = '<span style="color: #28a745;">✓ Available</span>';
+                    
+                    // Try to get more specific info about the platform
+                    const userAgent = navigator.userAgent;
+                    if (userAgent.includes('Mac')) {
+                        platformStatus.innerHTML += ' (Touch ID or Face ID)';
+                    } else if (userAgent.includes('Windows')) {
+                        platformStatus.innerHTML += ' (Windows Hello)';
+                    } else if (userAgent.includes('Android')) {
+                        platformStatus.innerHTML += ' (Fingerprint or Face unlock)';
+                    } else if (userAgent.includes('iPhone') || userAgent.includes('iPad')) {
+                        platformStatus.innerHTML += ' (Touch ID or Face ID)';
+                    }
+                } else {
+                    platformStatus.innerHTML = '<span style="color: #dc3545;">✗ Not available</span>';
+                }
+            } catch (error) {
+                platformStatus.innerHTML = '<span style="color: #ffc107;">? Unable to detect</span>';
+            }
+            
+            // Cross-platform authenticators are generally supported if WebAuthn is supported
+            if (window.PublicKeyCredential) {
+                crossPlatformStatus.innerHTML = '<span style="color: #28a745;">✓ Supported</span> (if you have a security key)';
+            } else {
+                crossPlatformStatus.innerHTML = '<span style="color: #dc3545;">✗ Not supported</span>';
+            }
+        }
+
+        // Get the selected authenticator type
+        function getSelectedAuthenticatorType() {
+            const radios = document.querySelectorAll('input[name="authenticatorType"]');
+            for (const radio of radios) {
+                if (radio.checked) {
+                    return radio.value;
+                }
+            }
+            return 'any';
+        }
+
+        // Build authenticator selection based on user choice
+        function buildAuthenticatorSelection(authenticatorType) {
+            const baseSelection = {
+                userVerification: "required",
+                residentKey: "required"
+            };
+            
+            if (authenticatorType === 'platform') {
+                return {
+                    ...baseSelection,
+                    authenticatorAttachment: "platform"
+                };
+            } else if (authenticatorType === 'cross-platform') {
+                return {
+                    ...baseSelection,
+                    authenticatorAttachment: "cross-platform"
+                };
+            } else {
+                // 'any' - don't specify authenticatorAttachment
+                return baseSelection;
+            }
+        }
+
+        // Improved credential ID conversion for YubiKey compatibility
+        function base64urlToUint8Array(base64url) {
+            // Convert base64url to base64
+            const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+            // Add padding if needed
+            const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+            
+            try {
+                const binaryString = atob(padded);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                return bytes;
+            } catch (error) {
+                console.error('Error converting credential ID:', error);
+                // Fallback to the original method
+                return new Uint8Array(Array.from(atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
+            }
+        }
+
+        // Convert ArrayBuffer to Uint8Array if needed
+        function ensureUint8Array(buffer) {
+            if (buffer instanceof ArrayBuffer) {
+                return new Uint8Array(buffer);
+            } else if (buffer instanceof Uint8Array) {
+                return buffer;
+            }
+            return buffer;
+        }
+
+        async function registerPasskey() {
+            const registerBtn = document.getElementById('registerBtn');
+            const registerStatus = document.getElementById('registerStatus');
+            
+            try {
+                registerBtn.disabled = true;
+                registerStatus.innerHTML = '<div>Registering passkey...</div>';
+
+                const challenge = generateChallenge();
+                const userId = crypto.getRandomValues(new Uint8Array(64));
+
+                const authenticatorType = getSelectedAuthenticatorType();
+                const authenticatorSelection = buildAuthenticatorSelection(authenticatorType);
+
+                const createCredentialOptions = {
+                    publicKey: {
+                        challenge: challenge,
+                        rp: {
+                            name: "Passkey PRF Example",
+                            id: window.location.hostname
+                        },
+                        user: {
+                            id: userId,
+                            name: "user@example.com",
+                            displayName: "Example User"
+                        },
+                        pubKeyCredParams: [
+                            { alg: -7, type: "public-key" }, // ES256
+                            { alg: -257, type: "public-key" } // RS256
+                        ],
+                        authenticatorSelection: authenticatorSelection,
+                        timeout: 60000,
+                        extensions: {
+                            prf: { } // Request PRF extension support
+                        }
+                    }
+                };
+
+                console.log('Creating credential with options:', JSON.stringify(createCredentialOptions, null, 2));
+                const credential = await navigator.credentials.create(createCredentialOptions);
+                
+                credentialId = credential.id;
+                const extensionResults = credential.getClientExtensionResults();
+                console.log('Credential created:', credential);
+                console.log('Extension results:', extensionResults);
+                
+                const prfSupported = extensionResults.prf && extensionResults.prf.enabled;
+                
+                // Save this credential for future use
+                saveCredential(credentialId, prfSupported, authenticatorType);
+                
+                let finalStatus = `
+                    <div class="success">
+                        <strong>Passkey registered successfully!</strong><br>
+                        Credential ID: ${credentialId}<br>
+                        PRF Extension Enabled: ${prfSupported}<br>
+                        Authenticator Type: ${authenticatorType}
+                    </div>
+                `;
+                
+                // If PRF is reported as supported, do a quick test to verify it actually works
+                if (prfSupported) {
+                    try {
+                        registerStatus.innerHTML = finalStatus + '<div style="margin-top: 10px;">Testing PRF functionality...</div>';
+                        
+                        // Give a small delay to ensure the credential is fully registered
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        const testChallenge = generateChallenge();
+                        const testSalt = stringToUint8Array('registration-test');
+                        
+                        console.log('Starting PRF test after registration...');
+                        console.log('Test credential ID:', credentialId);
+                        console.log('Test salt:', testSalt);
+                        
+                        const testOptions = {
+                            publicKey: {
+                                challenge: testChallenge,
+                                allowCredentials: [{
+                                    type: 'public-key',
+                                    id: base64urlToUint8Array(credentialId)
+                                }],
+                                userVerification: 'required',
+                                timeout: 30000,
+                                extensions: {
+                                    prf: {
+                                        eval: {
+                                            first: testSalt
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        
+                        console.log('PRF test options:', testOptions);
+                        const testCred = await navigator.credentials.get(testOptions);
+                        const testExtensionResults = testCred.getClientExtensionResults();
+                        
+                        console.log('PRF test extension results:', testExtensionResults);
+                        console.log('PRF test results object:', testExtensionResults.prf?.results);
+                        console.log('PRF test first result:', testExtensionResults.prf?.results?.first);
+                        
+                        const prfResult = testExtensionResults.prf?.results?.first;
+                        const convertedResult = prfResult ? ensureUint8Array(prfResult) : null;
+                        console.log('Converted PRF result:', convertedResult);
+                        console.log('PRF result length:', convertedResult?.length);
+                        
+                        const actuallyWorks = testExtensionResults.prf && 
+                                            testExtensionResults.prf.results && 
+                                            testExtensionResults.prf.results.first &&
+                                            convertedResult && convertedResult.length > 0;
+                        
+                        console.log('PRF actually works?', actuallyWorks);
+                        
+                        if (actuallyWorks) {
+                            finalStatus += '<br><span style="color: #28a745;">✓ PRF functionality verified!</span>';
+                            document.getElementById('prfBtn').disabled = false;
+                        } else {
+                            console.warn('PRF test failed - keeping original enabled status');
+                            finalStatus += '<br><span style="color: #17a2b8;">ℹ PRF enabled but test inconclusive - trying anyway</span>';
+                            document.getElementById('prfBtn').disabled = false;
+                            // Don't update the credential as unsupported - keep the original enabled status
+                        }
+                        
+                    } catch (testError) {
+                        console.warn('PRF test failed with error:', testError);
+                        finalStatus += '<br><span style="color: #17a2b8;">ℹ PRF enabled but test failed - trying anyway</span>';
+                        document.getElementById('prfBtn').disabled = false;
+                        // Don't update the credential as unsupported - keep the original enabled status
+                    }
+                } else {
+                    registerStatus.innerHTML += '<div style="color: #ffc107; margin-top: 10px;"><strong>Warning:</strong> PRF extension not supported by this authenticator. Try a different authenticator type for PRF support.</div>';
+                }
+                
+                registerStatus.innerHTML = finalStatus;
+                
+            } catch (error) {
+                registerStatus.innerHTML = `<div class="error">Registration failed: ${error.message}</div>`;
+                console.error('Registration error:', error);
+            } finally {
+                registerBtn.disabled = false;
+            }
+        }
+
+        async function evaluatePRF() {
+            const prfBtn = document.getElementById('prfBtn');
+            const prfStatus = document.getElementById('prfStatus');
+            const prfOutput = document.getElementById('prfOutput');
+            const saltInput = document.getElementById('saltInput').value;
+            
+            if (!credentialId) {
+                prfStatus.innerHTML = '<div class="error">Please register a passkey first</div>';
+                return;
+            }
+
+            if (!saltInput) {
+                prfStatus.innerHTML = '<div class="error">Please enter a salt value</div>';
+                return;
+            }
+
+            try {
+                prfBtn.disabled = true;
+                prfStatus.innerHTML = '<div>Evaluating PRF...</div>';
+                prfOutput.innerHTML = '';
+
+                // Convert salt input to Uint8Array
+                let salt;
+                try {
+                    // Try to parse as hex first
+                    if (/^[0-9a-fA-F\s]+$/.test(saltInput)) {
+                        salt = hexToUint8Array(saltInput);
+                    } else {
+                        // Treat as regular string
+                        salt = stringToUint8Array(saltInput);
+                    }
+                } catch {
+                    // If hex parsing fails, treat as string
+                    salt = stringToUint8Array(saltInput);
+                }
+
+                const challenge = generateChallenge();
+
+                const getCredentialOptions = {
+                    publicKey: {
+                        challenge: challenge,
+                        allowCredentials: [{
+                            type: 'public-key',
+                            id: base64urlToUint8Array(credentialId)
+                        }],
+                        userVerification: 'required',
+                        timeout: 60000,
+                        extensions: {
+                            prf: {
+                                eval: {
+                                    first: salt
+                                }
+                            }
+                        }
+                    }
+                };
+
+                console.log('PRF authentication options:', JSON.stringify({
+                    ...getCredentialOptions,
+                    publicKey: {
+                        ...getCredentialOptions.publicKey,
+                        challenge: '[Challenge bytes]',
+                        allowCredentials: [{
+                            ...getCredentialOptions.publicKey.allowCredentials[0],
+                            id: '[Credential ID bytes]'
+                        }]
+                    }
+                }, null, 2));
+                console.log('Salt being used:', salt);
+                console.log('Salt hex:', uint8ArrayToHex(salt));
+                console.log('Credential ID:', credentialId);
+
+                const cred = await navigator.credentials.get(getCredentialOptions);
+                const extensionResults = cred.getClientExtensionResults();
+                
+                console.log('Authentication credential:', cred);
+                console.log('Full extension results:', extensionResults);
+                console.log('PRF extension results:', extensionResults.prf);
+                
+                if (extensionResults.prf && extensionResults.prf.results) {
+                    let key = extensionResults.prf.results.first;
+                    
+                    console.log('Extracted key (raw):', key);
+                    console.log('Key type:', typeof key);
+                    console.log('Key constructor:', key?.constructor?.name);
+                    console.log('Key is Uint8Array:', key instanceof Uint8Array);
+                    console.log('Key is ArrayBuffer:', key instanceof ArrayBuffer);
+                    
+                    // Convert ArrayBuffer to Uint8Array if needed (YubiKey often returns ArrayBuffer)
+                    key = ensureUint8Array(key);
+                    console.log('Key after conversion:', key);
+                    console.log('Key length after conversion:', key?.length);
+                    
+                    if (key && key.length > 0) {
+                        prfStatus.innerHTML = '<div class="success">PRF evaluation successful!</div>';
+                        prfOutput.innerHTML = `
+                            <div class="output">
+                                <strong>Input Salt:</strong><br>
+                                Hex: ${uint8ArrayToHex(salt)}<br>
+                                Text: ${saltInput}<br>
+                                Length: ${salt.length} bytes<br><br>
+                                
+                                <strong>PRF Output:</strong><br>
+                                Hex: ${uint8ArrayToHex(key)}<br>
+                                Length: ${key.length} bytes<br>
+                                Array: [${Array.from(key).join(', ')}]<br><br>
+                                
+                                <strong>Authenticator Info:</strong><br>
+                                Type: ${key.constructor?.name || 'Unknown'}<br>
+                                Original Length: ${extensionResults.prf.results.first?.length || 'N/A'}
+                            </div>
+                        `;
+                    } else {
+                        prfStatus.innerHTML = '<div class="error">PRF extension returned empty or invalid result</div>';
+                        prfOutput.innerHTML = `
+                            <div class="output">
+                                <strong>Debug Info:</strong><br>
+                                Extension Results: ${JSON.stringify(extensionResults, null, 2)}<br>
+                                PRF Results: ${JSON.stringify(extensionResults.prf?.results, (key, value) => {
+                                    if (value instanceof ArrayBuffer || value instanceof Uint8Array) {
+                                        return `[${Array.from(new Uint8Array(value)).join(', ')}]`;
+                                    }
+                                    return value;
+                                }, 2)}<br>
+                                Raw Key Value: ${key}<br>
+                                Key Type: ${typeof key}<br>
+                                Key Constructor: ${key?.constructor?.name}<br>
+                                Key Length: ${key?.length}<br>
+                                Is ArrayBuffer: ${extensionResults.prf.results.first instanceof ArrayBuffer}<br>
+                                Is Uint8Array: ${extensionResults.prf.results.first instanceof Uint8Array}
+                            </div>
+                        `;
+                    }
+                } else {
+                    prfStatus.innerHTML = '<div class="error">PRF extension results not available</div>';
+                    prfOutput.innerHTML = `
+                        <div class="output">
+                            <strong>Debug Info:</strong><br>
+                            Full Extension Results: ${JSON.stringify(extensionResults, (key, value) => {
+                                if (value instanceof ArrayBuffer || value instanceof Uint8Array) {
+                                    return `[${Array.from(new Uint8Array(value)).join(', ')}]`;
+                                }
+                                return value;
+                            }, 2)}
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                prfStatus.innerHTML = `<div class="error">PRF evaluation failed: ${error.message}</div>`;
+                console.error('PRF evaluation error:', error);
+            } finally {
+                prfBtn.disabled = false;
+            }
+        }
+
+        // Check WebAuthn support on page load
+        window.addEventListener('load', function() {
+            if (!window.PublicKeyCredential) {
+                document.body.innerHTML = '<div class="error">WebAuthn is not supported in this browser</div>';
+            } else {
+                // Check for existing passkeys first
+                checkExistingPasskeys();
+            }
+        });
+    </script>
+</body>
+</html>
+
