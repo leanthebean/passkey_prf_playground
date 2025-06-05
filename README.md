@@ -4,12 +4,11 @@ A comprehensive playground to explore and test the WebAuthn PRF (Pseudo-Random F
 
 ## What is PRF?
 
-The PRF (Pseudo-Random Function) extension is a WebAuthn extension that allows passkeys to generate deterministic cryptographic keys from user-provided salt values. This enables secure key derivation scenarios, such as:
+The PRF (Pseudo-Random Function) extension is a WebAuthn extension that allows passkeys to generate deterministic cryptographic keys from provided salt values. This enables secure key derivation scenarios, such as:
 
 - **Client-side encryption/decryption**: Generate encryption keys without storing them
-- **Deterministic key generation**: Same salt + same passkey = same derived key
-- **Zero-knowledge encryption**: Encrypt data that only the passkey holder can decrypt
-- **Password-less key derivation**: Replace traditional password-based key derivation
+- **Deterministic key generation**: Same salt + same passkey = same derived key pair
+- **Asymmetric encryption**: Encrypt data that only the passkey holder can decrypt
 
 ## Current Support Status
 
