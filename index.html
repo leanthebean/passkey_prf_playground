@@ -96,6 +96,7 @@
                     <label for="platformAuth"><strong>Platform Authenticator</strong> (Touch ID, Face ID, Windows Hello)</label>
                     <div id="platformStatus" style="margin-left: 25px; font-size: 0.9em; color: #666;"></div>
                     <div style="margin-left: 25px; font-size: 0.8em; color: #888;">Built into your device, uses biometrics or device PIN</div>
+                    <div style="margin-left: 25px; font-size: 0.8em; color: #e67e22; margin-top: 5px;"><strong>⚠️ macOS users:</strong> Requires macOS Sequoia 15.4.1+ with iCloud Keychain enabled</div>
                 </div>
                 <div style="margin: 10px 0;">
                     <input type="radio" id="crossPlatformAuth" name="authenticatorType" value="cross-platform">
@@ -757,6 +758,104 @@
             }
         });
     </script>
+
+    <div class="step">
+        <h3>✅ Supported Platforms/Devices (as of June 2025)</h3>
+        <div class="container">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Layer</th>
+                        <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Platform / product</th>
+                        <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">PRF today</th>
+                        <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td rowspan="4" style="border: 1px solid #ddd; padding: 8px; vertical-align: top; font-weight: bold;">Platform passkeys</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">iOS 18 / iPadOS 18</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ (full)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Shipped with Safari 18; ASAuthorizationPublicKeyCredentialPrf… APIs now public</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">macOS Sequoia 15.4+</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ (iCloud Keychain passkeys)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Works in Safari 18.4 and Chrome/Edge ≥128 that call the OS APIs. <strong>Requires iCloud Keychain to be enabled</strong>. External security-key "QR-code" flows still omit PRF</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Android 14 + Google Password Manager (Chrome ≥130)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Blink's "Intent-to-Ship" covers all six Chromium platforms, incl. Android; depends on updated WebAuthn libs in Play-Services</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Windows Hello (Windows 11 24H1)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #dc3545;">❌</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Microsoft has not enabled the PRF code path yet; feature-request thread still open</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="2" style="border: 1px solid #ddd; padding: 8px; vertical-align: top; font-weight: bold;">Roaming security keys</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">YubiKey 5 series / Bio / Security Key 2</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Firmware ≥ 5.2 advertises CTAP2 hmac-secret, which WebAuthn PRF reuses</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Google Titan M2, Feitian BioPass, Solo V2</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">All ship with hmac-secret; PRF works in any PRF-aware browser</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="4" style="border: 1px solid #ddd; padding: 8px; vertical-align: top; font-weight: bold;">Browsers</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Chrome / Edge desktop ≥ 128</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ (default-on)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">First stable version with PRF fully on by default</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Chrome Android ≥ 130</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ (default-on)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Same Blink code path as desktop</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Safari 18.0+</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ (platform credentials)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">PRF only returned for platform passkeys; external keys & QR-flows still return undefined</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Firefox ≥ 114</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #ffc107;">🟡</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">PRF available only when a CTAP-level hardware key (e.g., YubiKey) is used; no platform-passkey PRF yet</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="4" style="border: 1px solid #ddd; padding: 8px; vertical-align: top; font-weight: bold;">Password-manager passkey vaults</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">1Password</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅ on iOS 8.10.74+; 🟡 desktop</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">iOS build adds PRF-based vault unlock; desktop editions rely on the underlying OS/browser, so PRF works on macOS 15.4+ but not Windows yet</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Bitwarden (web & browser-ext v2025.2)</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Uses PRF to decrypt the vault when both the browser and authenticator expose it</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Google Password Manager</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #28a745;">✅</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Passkeys synced via Google TPM-backed store expose PRF in Chrome</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Dashlane, Proton Pass, Enpass</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: #dc3545;">❌</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">Have announced passkey storage but no PRF roadmap yet</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div style="margin-top: 15px; font-size: 0.85em; color: #666;">
+                <strong>Legend:</strong><br>
+                <span style="color: #28a745;">✅ (full)</span> – PRF works out-of-the-box with the built-in passkey store.<br>
+                <span style="color: #ffc107;">🟡 (partial)</span> – Only certain combinations (e.g., hardware keys) expose PRF, or you must enable a browser flag.<br>
+                <span style="color: #dc3545;">❌</span> – No PRF yet.
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 
