@@ -72,6 +72,8 @@
             margin-top: 0;
         }
     </style>
+    <script src="https://unpkg.com/@coinbase/wallet-sdk@3.9.3/dist/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web3@4.2.2/dist/web3.min.js"></script>
 </head>
 <body>
     <h1>Passkey PRF Extension Example</h1>
@@ -140,14 +142,26 @@
     </div>
 
     <div class="step">
-        <h3>Step 2: PRF Evaluation</h3>
+        <h3>Step 2: Encrypt & Store Secret Message</h3>
         <div class="container">
-            <label for="saltInput">Enter Salt (hex string or text):</label>
-            <input type="text" id="saltInput" placeholder="Enter salt value (e.g., 'hello world' or '48656c6c6f20576f726c64')" value="hello world">
+            <label for="messageInput">Enter secret message to encrypt:</label>
+            <input type="text" id="messageInput" placeholder="Enter your secret message here..." value="Hello, this is my secret!">
             <br>
-            <button id="prfBtn" onclick="evaluatePRF()" disabled>Compute PRF!</button>
-            <div id="prfStatus"></div>
-            <div id="prfOutput"></div>
+            <button id="encryptBtn" onclick="encryptAndStore()" disabled>Encrypt & Store on Base Sepolia</button>
+            <div id="encryptStatus"></div>
+            <div id="encryptOutput"></div>
+        </div>
+    </div>
+
+    <div class="step">
+        <h3>Step 3: Decrypt Secret Message</h3>
+        <div class="container">
+            <label for="keyInput">Enter storage key (from encryption step):</label>
+            <input type="text" id="keyInput" placeholder="Paste the storage key here...">
+            <br>
+            <button id="decryptBtn" onclick="decryptFromStorage()" disabled>Decrypt from Base Sepolia</button>
+            <div id="decryptStatus"></div>
+            <div id="decryptOutput"></div>
         </div>
     </div>
 
@@ -302,9 +316,10 @@
                     </div>
                 `;
                 
-                // Enable PRF button if supported
+                // Enable encrypt button if supported
                 if (prfSupported) {
-                    document.getElementById('prfBtn').disabled = false;
+                    document.getElementById('encryptBtn').disabled = false;
+                    document.getElementById('decryptBtn').disabled = false;
                 } else {
                     passkeyStatus.innerHTML += '<div style="color: #ffc107; margin-top: 10px;"><strong>Note:</strong> This passkey does not support PRF extension. Consider registering a new one with a different authenticator.</div>';
                 }
@@ -762,6 +777,430 @@
                 console.error('PRF evaluation error:', error);
             } finally {
                 prfBtn.disabled = false;
+            }
+        }
+
+        // Smart contract configuration
+        const CONTRACT_ADDRESS = '0xF6e775265921392E9374Ca7756d007b43bde2f1E';
+        const BASE_SEPOLIA_RPC = 'https://sepolia.base.org';
+        const CONTRACT_ABI = [
+            {
+                "inputs": [
+                    {"internalType": "bytes32", "name": "key", "type": "bytes32"},
+                    {"internalType": "bytes", "name": "data", "type": "bytes"}
+                ],
+                "name": "storeBlob",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"internalType": "bytes32", "name": "key", "type": "bytes32"}
+                ],
+                "name": "getBlob",
+                "outputs": [
+                    {"internalType": "bytes", "name": "", "type": "bytes"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"internalType": "bytes32", "name": "key", "type": "bytes32"}
+                ],
+                "name": "blobExistsForKey",
+                "outputs": [
+                    {"internalType": "bool", "name": "", "type": "bool"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        // Simple AES-GCM encryption using Web Crypto API
+        async function encryptMessage(message, prfKey) {
+            // Derive an AES key from the PRF result
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                prfKey,
+                'PBKDF2',
+                false,
+                ['deriveKey']
+            );
+            
+            const salt = crypto.getRandomValues(new Uint8Array(16));
+            const aesKey = await crypto.subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: 100000,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                {
+                    name: 'AES-GCM',
+                    length: 256
+                },
+                false,
+                ['encrypt']
+            );
+            
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const messageBytes = new TextEncoder().encode(message);
+            
+            const encrypted = await crypto.subtle.encrypt(
+                {
+                    name: 'AES-GCM',
+                    iv: iv
+                },
+                aesKey,
+                messageBytes
+            );
+            
+            // Combine salt, iv, and encrypted data
+            const result = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+            result.set(salt, 0);
+            result.set(iv, salt.length);
+            result.set(new Uint8Array(encrypted), salt.length + iv.length);
+            
+            return result;
+        }
+        
+        // Simple AES-GCM decryption using Web Crypto API
+        async function decryptMessage(encryptedData, prfKey) {
+            // Extract salt, iv, and encrypted data
+            const salt = encryptedData.slice(0, 16);
+            const iv = encryptedData.slice(16, 28);
+            const encrypted = encryptedData.slice(28);
+            
+            // Derive the same AES key
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                prfKey,
+                'PBKDF2',
+                false,
+                ['deriveKey']
+            );
+            
+            const aesKey = await crypto.subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: 100000,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                {
+                    name: 'AES-GCM',
+                    length: 256
+                },
+                false,
+                ['decrypt']
+            );
+            
+            const decrypted = await crypto.subtle.decrypt(
+                {
+                    name: 'AES-GCM',
+                    iv: iv
+                },
+                aesKey,
+                encrypted
+            );
+            
+            return new TextDecoder().decode(decrypted);
+        }
+
+        // Encrypt message and store on Base Sepolia
+        async function encryptAndStore() {
+            const encryptBtn = document.getElementById('encryptBtn');
+            const encryptStatus = document.getElementById('encryptStatus');
+            const encryptOutput = document.getElementById('encryptOutput');
+            const messageInput = document.getElementById('messageInput').value;
+            
+            if (!credentialId) {
+                encryptStatus.innerHTML = '<div class="error">Please register or authenticate with a passkey first</div>';
+                return;
+            }
+            
+            if (!messageInput.trim()) {
+                encryptStatus.innerHTML = '<div class="error">Please enter a message to encrypt</div>';
+                return;
+            }
+            
+            try {
+                encryptBtn.disabled = true;
+                encryptStatus.innerHTML = '<div>Step 1: Deriving encryption key from passkey...</div>';
+                encryptOutput.innerHTML = '';
+                
+                // Use hardcoded salt 'passkeysecret'
+                const salt = stringToUint8Array('passkeysecret');
+                const challenge = generateChallenge();
+                
+                // Get PRF result for encryption key
+                const getCredentialOptions = {
+                    publicKey: {
+                        challenge: challenge,
+                        allowCredentials: [{
+                            type: 'public-key',
+                            id: base64urlToUint8Array(credentialId)
+                        }],
+                        userVerification: 'required',
+                        timeout: 60000,
+                        extensions: {
+                            prf: {
+                                eval: {
+                                    first: salt
+                                }
+                            }
+                        }
+                    }
+                };
+                
+                const cred = await navigator.credentials.get(getCredentialOptions);
+                const extensionResults = cred.getClientExtensionResults();
+                
+                if (!extensionResults.prf || !extensionResults.prf.results || !extensionResults.prf.results.first) {
+                    throw new Error('PRF extension failed to generate key');
+                }
+                
+                const prfKey = ensureUint8Array(extensionResults.prf.results.first);
+                console.log('PRF key for encryption:', uint8ArrayToHex(prfKey));
+                
+                encryptStatus.innerHTML = '<div>Step 2: Encrypting message...</div>';
+                
+                // Encrypt the message
+                const encryptedData = await encryptMessage(messageInput, prfKey);
+                console.log('Encrypted data:', uint8ArrayToHex(encryptedData));
+                
+                encryptStatus.innerHTML = '<div>Step 3: Preparing for blockchain storage...</div>';
+                
+                // Generate storage key from PRF result + message hash
+                const messageHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(messageInput));
+                const storageKeyData = new Uint8Array(prfKey.length + messageHash.byteLength);
+                storageKeyData.set(prfKey, 0);
+                storageKeyData.set(new Uint8Array(messageHash), prfKey.length);
+                const storageKeyHash = await crypto.subtle.digest('SHA-256', storageKeyData);
+                const storageKey = '0x' + uint8ArrayToHex(new Uint8Array(storageKeyHash));
+                
+                console.log('Storage key:', storageKey);
+                
+                // Display encrypted blob before storing
+                encryptOutput.innerHTML = `
+                    <div class="output">
+                        <strong>🔒 Encrypted Blob (before storing on-chain):</strong><br>
+                        <strong>Original Message:</strong> ${messageInput}<br>
+                        <strong>Salt Used:</strong> 'passkeysecret'<br>
+                        <strong>PRF Key (hex):</strong> ${uint8ArrayToHex(prfKey)}<br>
+                        <strong>Encrypted Data (hex):</strong> ${uint8ArrayToHex(encryptedData)}<br>
+                        <strong>Storage Key:</strong> ${storageKey}<br>
+                        <strong>Encrypted Data Size:</strong> ${encryptedData.length} bytes<br><br>
+                        <em>Now storing on Base Sepolia...</em>
+                    </div>
+                `;
+                
+                encryptStatus.innerHTML = '<div>Step 4: Storing on Base Sepolia (please wait for transaction confirmation)...</div>';
+                
+                // Initialize Coinbase Wallet SDK
+                let web3;
+                let accounts;
+                
+                if (typeof window.ethereum !== 'undefined') {
+                    // Use existing wallet (MetaMask, Coinbase Wallet, etc.)
+                    web3 = new Web3(window.ethereum);
+                    accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    
+                    // Switch to Base Sepolia
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x14a34' }], // Base Sepolia chain ID
+                        });
+                    } catch (switchError) {
+                        // Chain not added to wallet
+                        if (switchError.code === 4902) {
+                            await window.ethereum.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: '0x14a34',
+                                    chainName: 'Base Sepolia',
+                                    nativeCurrency: {
+                                        name: 'ETH',
+                                        symbol: 'ETH',
+                                        decimals: 18
+                                    },
+                                    rpcUrls: ['https://sepolia.base.org'],
+                                    blockExplorerUrls: ['https://sepolia.basescan.org']
+                                }]
+                            });
+                        } else {
+                            throw switchError;
+                        }
+                    }
+                } else {
+                    // Initialize Coinbase Wallet SDK
+                    const coinbaseWallet = new CoinbaseWalletSDK({
+                        appName: 'Passkey PRF Playground',
+                        appLogoUrl: 'https://example.com/logo.png',
+                        darkMode: false
+                    });
+                    
+                    const ethereum = coinbaseWallet.makeWeb3Provider(BASE_SEPOLIA_RPC, 84532); // Base Sepolia chain ID
+                    web3 = new Web3(ethereum);
+                    accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                }
+                
+                const contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
+                
+                // Store encrypted data on blockchain
+                const gasEstimate = await contract.methods.storeBlob(storageKey, '0x' + uint8ArrayToHex(encryptedData)).estimateGas({ from: accounts[0] });
+                
+                // Convert BigInt to number for gas calculation
+                const gasEstimateNum = Number(gasEstimate);
+                const gasLimit = Math.floor(gasEstimateNum * 1.2); // Add 20% buffer
+                
+                const tx = await contract.methods.storeBlob(storageKey, '0x' + uint8ArrayToHex(encryptedData)).send({
+                    from: accounts[0],
+                    gas: gasLimit.toString(),
+                });
+                
+                console.log('Transaction sent:', tx.transactionHash);
+                
+                encryptStatus.innerHTML = `<div>Transaction confirmed! <a href="https://sepolia.basescan.org/tx/${tx.transactionHash}" target="_blank">View on BaseScan</a></div>`;
+                
+                console.log('Transaction confirmed:', tx);
+                
+                encryptStatus.innerHTML = '<div class="success">✅ Message successfully encrypted and stored on Base Sepolia!</div>';
+                encryptOutput.innerHTML = `
+                    <div class="output">
+                        <strong>🎉 Success! Message stored on blockchain:</strong><br>
+                        <strong>Transaction Hash:</strong> <a href="https://sepolia.basescan.org/tx/${tx.transactionHash}" target="_blank">${tx.transactionHash}</a><br>
+                        <strong>Contract Address:</strong> <a href="https://sepolia.basescan.org/address/${CONTRACT_ADDRESS}" target="_blank">${CONTRACT_ADDRESS}</a><br>
+                        <strong>Storage Key:</strong> ${storageKey}<br>
+                        <strong>Block Number:</strong> ${Number(tx.blockNumber)}<br>
+                        <strong>Gas Used:</strong> ${Number(tx.gasUsed)}<br><br>
+                        <strong>📋 To decrypt this message later:</strong><br>
+                        Copy this storage key: <code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">${storageKey}</code>
+                    </div>
+                `;
+                
+                // Auto-fill the decrypt key input
+                document.getElementById('keyInput').value = storageKey;
+                
+            } catch (error) {
+                encryptStatus.innerHTML = `<div class="error">Encryption/Storage failed: ${error.message}</div>`;
+                console.error('Encryption/Storage error:', error);
+            } finally {
+                encryptBtn.disabled = false;
+            }
+        }
+        
+        // Decrypt message from storage
+        async function decryptFromStorage() {
+            const decryptBtn = document.getElementById('decryptBtn');
+            const decryptStatus = document.getElementById('decryptStatus');
+            const decryptOutput = document.getElementById('decryptOutput');
+            const keyInput = document.getElementById('keyInput').value;
+            
+            if (!credentialId) {
+                decryptStatus.innerHTML = '<div class="error">Please register or authenticate with a passkey first</div>';
+                return;
+            }
+            
+            if (!keyInput.trim()) {
+                decryptStatus.innerHTML = '<div class="error">Please enter a storage key</div>';
+                return;
+            }
+            
+            try {
+                decryptBtn.disabled = true;
+                decryptStatus.innerHTML = '<div>Step 1: Retrieving encrypted data from Base Sepolia...</div>';
+                decryptOutput.innerHTML = '';
+                
+                // Initialize Web3 for reading data
+                let web3;
+                
+                if (typeof window.ethereum !== 'undefined') {
+                    web3 = new Web3(window.ethereum);
+                } else {
+                    // Use public RPC for reading
+                    web3 = new Web3(BASE_SEPOLIA_RPC);
+                }
+                
+                const contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
+                
+                // Check if blob exists
+                const exists = await contract.methods.blobExistsForKey(keyInput).call();
+                if (!exists) {
+                    throw new Error('No data found for this storage key');
+                }
+                
+                // Retrieve encrypted data
+                const encryptedDataHex = await contract.methods.getBlob(keyInput).call();
+                const encryptedData = hexToUint8Array(encryptedDataHex.slice(2)); // Remove '0x' prefix
+                
+                console.log('Retrieved encrypted data:', uint8ArrayToHex(encryptedData));
+                
+                decryptStatus.innerHTML = '<div>Step 2: Deriving decryption key from passkey...</div>';
+                
+                // Use the same hardcoded salt 'passkeysecret'
+                const salt = stringToUint8Array('passkeysecret');
+                const challenge = generateChallenge();
+                
+                // Get PRF result for decryption key
+                const getCredentialOptions = {
+                    publicKey: {
+                        challenge: challenge,
+                        allowCredentials: [{
+                            type: 'public-key',
+                            id: base64urlToUint8Array(credentialId)
+                        }],
+                        userVerification: 'required',
+                        timeout: 60000,
+                        extensions: {
+                            prf: {
+                                eval: {
+                                    first: salt
+                                }
+                            }
+                        }
+                    }
+                };
+                
+                const cred = await navigator.credentials.get(getCredentialOptions);
+                const extensionResults = cred.getClientExtensionResults();
+                
+                if (!extensionResults.prf || !extensionResults.prf.results || !extensionResults.prf.results.first) {
+                    throw new Error('PRF extension failed to generate key');
+                }
+                
+                const prfKey = ensureUint8Array(extensionResults.prf.results.first);
+                console.log('PRF key for decryption:', uint8ArrayToHex(prfKey));
+                
+                decryptStatus.innerHTML = '<div>Step 3: Decrypting message...</div>';
+                
+                // Decrypt the message
+                const decryptedMessage = await decryptMessage(encryptedData, prfKey);
+                
+                decryptStatus.innerHTML = '<div class="success">✅ Message successfully decrypted!</div>';
+                decryptOutput.innerHTML = `
+                    <div class="output">
+                        <strong>🔓 Decrypted Message:</strong><br>
+                        <div style="background: #e8f5e8; border: 2px solid #4caf50; padding: 15px; border-radius: 5px; margin: 10px 0; font-size: 1.1em;">
+                            ${decryptedMessage}
+                        </div>
+                        <strong>Storage Key Used:</strong> ${keyInput}<br>
+                        <strong>Salt Used:</strong> 'passkeysecret'<br>
+                        <strong>PRF Key (hex):</strong> ${uint8ArrayToHex(prfKey)}<br>
+                        <strong>Encrypted Data Size:</strong> ${encryptedData.length} bytes
+                    </div>
+                `;
+                
+            } catch (error) {
+                decryptStatus.innerHTML = `<div class="error">Decryption failed: ${error.message}</div>`;
+                console.error('Decryption error:', error);
+            } finally {
+                decryptBtn.disabled = false;
             }
         }
 
